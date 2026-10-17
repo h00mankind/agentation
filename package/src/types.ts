@@ -29,6 +29,7 @@ export type Annotation = {
     boundingBox: { x: number; y: number; width: number; height: number };
   };
   drawingIndex?: number; // Index of linked draw stroke (if any)
+  attachments?: Attachment[]; // Reference images stored by the local server (max 4)
   elementBoundingBoxes?: Array<{
     x: number;
     y: number;
@@ -72,6 +73,14 @@ export type Annotation = {
 
   // Local-only sync tracking (not sent to server)
   _syncedTo?: string; // Session ID this annotation was synced to
+};
+
+export type Attachment = {
+  id: string; // sha256 hex of the stored bytes
+  mimeType: "image/png" | "image/jpeg";
+  width: number;
+  height: number;
+  path: string; // absolute path on the machine that wrote the file
 };
 
 // -----------------------------------------------------------------------------

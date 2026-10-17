@@ -442,6 +442,25 @@ describe("manual submission", () => {
     expect(send.disabled).toBe(false);
   });
 
+  it("keeps local attachment paths out of webhook annotations and markdown", async () => {
+    const hash = "b".repeat(64);
+    const attachment = { id: hash, mimeType: "image/png" as const, width: 800, height: 600 };
+    const request = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", request);
+    localStorage.setItem(getStorageKey(window.location.pathname), JSON.stringify([{
+      ...annotation,
+      attachments: [{ ...attachment, path: `/Users/me/.agentation/attachments/${hash}.png` }],
+    }]));
+    const send = setup({ webhookUrl: "https://example.test/hook" }, { webhooksEnabled: false }, false);
+    fireEvent.click(send);
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    const body: string = request.mock.calls[0][1].body;
+    expect(body).not.toContain("/Users/me");
+    const payload = JSON.parse(body);
+    expect(payload.annotations[0].attachments).toEqual([attachment]);
+    expect(payload.output).toContain(`- ${hash}.png (800×600)`);
+  });
+
   it("waits for asynchronous callback delivery before reporting success", async () => {
     let complete!: () => void;
     const delivery = new Promise<void>(resolve => { complete = resolve; });

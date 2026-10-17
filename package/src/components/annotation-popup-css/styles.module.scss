@@ -307,7 +307,8 @@
 
 .cancel,
 .submit,
-.deleteButton {
+.deleteButton,
+.attachButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -324,7 +325,8 @@
     opacity 0.15s ease;
 }
 
-.cancel {
+.cancel,
+.attachButton {
   background: transparent;
   color: rgba(255, 255, 255, 0.5);
 
@@ -346,10 +348,85 @@
   }
 }
 
-// Delete button wrapper
-.deleteWrapper {
+// Delete and attach sit apart from the primary actions
+.leadingActions {
   display: flex;
   margin-right: auto;
+}
+
+.attachButton {
+  width: 1.875rem;
+  padding: 0;
+}
+
+// =============================================================================
+// Attachments
+// =============================================================================
+
+.attachments {
+  display: flex;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+
+.attachment {
+  position: relative;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: opacity 0.15s ease;
+  }
+
+  &[data-status="uploading"] img {
+    opacity: 0.5;
+  }
+}
+
+.attachmentChip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 0.625rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.attachmentRemove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  .attachment:hover &,
+  &:focus-visible {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    opacity: 1;
+  }
 }
 
 .deleteButton {
@@ -433,13 +510,23 @@
     }
   }
 
-  .cancel {
+  .cancel,
+  .attachButton {
     color: rgba(0, 0, 0, 0.5);
 
     &:hover {
       background: rgba(0, 0, 0, 0.06);
       color: rgba(0, 0, 0, 0.75);
     }
+  }
+
+  .attachment {
+    background: rgba(0, 0, 0, 0.03);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  }
+
+  .attachmentChip {
+    color: rgba(0, 0, 0, 0.45);
   }
 
   .deleteButton {

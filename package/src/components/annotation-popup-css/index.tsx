@@ -6,6 +6,7 @@ import styles, { css as popupCss } from "./styles.module.scss";
 import { ensureStyles } from "../../utils/ensure-styles";
 import { AnnotationEditor, type AnnotationEditorHandle } from "./annotation-editor";
 import { originalSetTimeout } from "../../utils/freeze-animations";
+import type { Attachment } from "../../types";
 
 // =============================================================================
 // Helpers
@@ -28,8 +29,8 @@ export interface AnnotationPopupCSSProps {
   initialValue?: string;
   /** Label for submit button (default: "Add") */
   submitLabel?: string;
-  /** Called when annotation is submitted with text */
-  onSubmit: (text: string) => void;
+  /** Called when annotation is submitted with text and any uploaded reference images */
+  onSubmit: (text: string, attachments: Attachment[]) => void;
   /** Called when popup is cancelled/dismissed */
   onCancel: () => void;
   /** Called when delete button is clicked (only shown if provided) */
@@ -50,6 +51,10 @@ export interface AnnotationPopupCSSProps {
   lightMode?: boolean;
   /** Computed styles for the selected element */
   computedStyles?: Record<string, string>;
+  /** Server endpoint for image uploads; attaching is offered only when set */
+  attachmentEndpoint?: string;
+  /** Reference images already on the annotation (edit mode) */
+  initialAttachments?: Attachment[];
 }
 
 export interface AnnotationPopupCSSHandle {
@@ -81,6 +86,8 @@ export const AnnotationPopupCSS = forwardRef<AnnotationPopupCSSHandle, Annotatio
       onExitComplete,
       lightMode = false,
       computedStyles,
+      attachmentEndpoint,
+      initialAttachments,
     },
     ref
   ) {
@@ -184,6 +191,8 @@ export const AnnotationPopupCSS = forwardRef<AnnotationPopupCSSHandle, Annotatio
           allowEmpty={allowEmpty}
           accentColor={accentColor}
           computedStyles={computedStyles}
+          attachmentEndpoint={attachmentEndpoint}
+          initialAttachments={initialAttachments}
           disabled={visibleAnimState === "exit"}
         />
       </div>

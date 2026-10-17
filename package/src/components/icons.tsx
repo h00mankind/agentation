@@ -31,6 +31,21 @@ export const IconPlus = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
+// Image icon for attaching reference images
+export const IconImage = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+    <rect x="2.25" y="2.75" width="11.5" height="10.5" rx="2" stroke="currentColor" strokeWidth="1.5" />
+    <path
+      d="M2.5 11l3-3 2.5 2.5L10 8.5l3.5 3.5"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <circle cx="10.5" cy="5.75" r="1" fill="currentColor" />
+  </svg>
+);
+
 // Checkmark icon
 export const IconCheck = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none">

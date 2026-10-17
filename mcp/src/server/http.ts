@@ -30,7 +30,7 @@ import { isLoopbackAddress, isLoopbackHost, isLocalHostHeader } from "./network.
 import { createCorsPolicy } from "./cors.js";
 import { createWebhookDispatcher, type WebhookDispatcher } from "./webhooks.js";
 import {
-  ATTACHMENT_MAX_AGE_MS,
+  ATTACHMENT_ORPHAN_GRACE_MS,
   MAX_ATTACHMENT_BYTES,
   attachmentsDir,
   gcAttachments,
@@ -1038,12 +1038,12 @@ function matchRoute(
 // -----------------------------------------------------------------------------
 
 /**
- * Startup cleanup: drop attachment files no annotation references, plus any
- * file older than ATTACHMENT_MAX_AGE_MS. A failure here must not stop the server.
+ * Startup cleanup of attachment files no annotation references. A failure here
+ * must not stop the server.
  */
 function collectStaleAttachments(): void {
   try {
-    const removed = gcAttachments(attachmentsDir(), referencedAttachmentIds(), ATTACHMENT_MAX_AGE_MS);
+    const removed = gcAttachments(attachmentsDir(), referencedAttachmentIds(), ATTACHMENT_ORPHAN_GRACE_MS);
     if (removed > 0) log(`[Attachments] Removed ${removed} stale attachment file(s)`);
   } catch (err) {
     log(`[Attachments] Startup cleanup failed: ${(err as Error).message}`);

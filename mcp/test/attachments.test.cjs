@@ -4,7 +4,7 @@ const { mkdtempSync, rmSync, readdirSync, writeFileSync, utimesSync, statSync, e
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { createHash } = require('node:crypto');
-const { sniffImage, attachmentId, writeAttachment, readAttachment, parseAttachments, releaseAttachments, gcAttachments, deleteUnreferenced, ATTACHMENT_MAX_AGE_MS } = require('../.test-dist/integration.js');
+const { sniffImage, attachmentId, writeAttachment, readAttachment, parseAttachments, releaseAttachments, gcAttachments, ATTACHMENT_ORPHAN_GRACE_MS } = require('../.test-dist/integration.js');
 const { png, jpeg } = require('./image-fixtures.cjs');
 
 function fixture(t) {
@@ -104,28 +104,26 @@ test('releasing an attachment deletes it unless another annotation still referen
   assert.equal(existsSync(solo.path), false);
 });
 
-test('startup GC removes orphans and files older than seven days, and keeps fresh referenced files', t => {
+test('startup GC removes old orphans and temp files, and keeps referenced and fresh files', t => {
   const dir = fixture(t);
-  const kept = writeAttachment(dir, png(2, 2)).attachment;
-  const orphan = writeAttachment(dir, png(3, 3)).attachment;
-  const aged = writeAttachment(dir, png(4, 4)).attachment;
-  const old = new Date(Date.now() - ATTACHMENT_MAX_AGE_MS - DAY);
-  utimesSync(aged.path, old, old);
+  const old = new Date(Date.now() - ATTACHMENT_ORPHAN_GRACE_MS - 1000);
+  const age = path => utimesSync(path, old, old);
+  const referenced = writeAttachment(dir, png(2, 2)).attachment;
+  const oldOrphan = writeAttachment(dir, png(3, 3)).attachment;
+  const freshOrphan = writeAttachment(dir, png(4, 4)).attachment;
+  const temp = join(dir, `.${'a'.repeat(64)}.${'b'.repeat(12)}.tmp`);
+  writeFileSync(temp, 'partial');
   writeFileSync(join(dir, 'notes.txt'), 'not ours');
+  [referenced.path, oldOrphan.path, temp, join(dir, 'notes.txt')].forEach(age);
 
-  const removed = gcAttachments(dir, new Set([kept.id, aged.id]), ATTACHMENT_MAX_AGE_MS);
-
-  assert.equal(removed, 2);
-  assert.ok(existsSync(kept.path));
-  assert.equal(existsSync(orphan.path), false);
-  assert.equal(existsSync(aged.path), false);
+  assert.equal(gcAttachments(dir, new Set([referenced.id]), ATTACHMENT_ORPHAN_GRACE_MS), 2);
+  assert.ok(existsSync(referenced.path), 'referenced file survives regardless of age');
+  assert.ok(existsSync(freshOrphan.path), 'fresh upload not yet attached survives');
+  assert.equal(existsSync(oldOrphan.path), false);
+  assert.equal(existsSync(temp), false);
   assert.ok(existsSync(join(dir, 'notes.txt')));
 });
 
-test('the unreferenced sweep tolerates a missing directory and counts what it removes', t => {
-  const dir = fixture(t);
-  assert.equal(deleteUnreferenced(dir, new Set()), 0);
-  const { attachment } = writeAttachment(dir, png(1, 1));
-  assert.equal(deleteUnreferenced(dir, new Set([attachment.id])), 0);
-  assert.equal(deleteUnreferenced(dir, new Set()), 1);
+test('startup GC tolerates a missing directory', t => {
+  assert.equal(gcAttachments(join(fixture(t), 'missing'), new Set(), ATTACHMENT_ORPHAN_GRACE_MS), 0);
 });

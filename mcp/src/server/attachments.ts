@@ -11,7 +11,8 @@ import type { Annotation, Attachment } from "../types.js";
 
 export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_ANNOTATION = 4;
-export const ATTACHMENT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+// Uploads land before their annotation is submitted, so a fresh unreferenced file may still be claimed.
+export const ATTACHMENT_ORPHAN_GRACE_MS = 60 * 60 * 1000;
 
 type MimeType = Attachment["mimeType"];
 type ImageInfo = Pick<Attachment, "mimeType" | "width" | "height">;
@@ -19,6 +20,7 @@ type ImageInfo = Pick<Attachment, "mimeType" | "width" | "height">;
 const EXTENSIONS: Record<MimeType, string> = { "image/png": "png", "image/jpeg": "jpg" };
 const ID_PATTERN = /^[a-f0-9]{64}$/;
 const FILE_PATTERN = /^([a-f0-9]{64})\.(png|jpg)$/;
+const TEMP_PATTERN = /^\.[a-f0-9]{64}\.[a-f0-9]{12}\.tmp$/;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export function attachmentsDir(): string {
@@ -207,31 +209,25 @@ export function releaseAttachments(
   }
 }
 
-/** Startup sweep: removes every file that no annotation references. */
-export function deleteUnreferenced(dir: string, referencedIds: ReadonlySet<string>): number {
-  return sweep(dir, (id) => !referencedIds.has(id));
-}
-
-/** Startup GC: unreferenced files, plus any file whose mtime is older than maxAgeMs. */
+/**
+ * Startup GC: removes unreferenced files and leftover temp files once they are
+ * older than graceMs. Referenced files live until their annotation is deleted.
+ */
 export function gcAttachments(
   dir: string,
   referencedIds: ReadonlySet<string>,
-  maxAgeMs: number,
+  graceMs: number,
   now = Date.now(),
 ): number {
-  const cutoff = now - maxAgeMs;
-  return deleteUnreferenced(dir, referencedIds) + sweep(dir, (_id, mtimeMs) => mtimeMs < cutoff);
-}
-
-function sweep(dir: string, shouldRemove: (id: string, mtimeMs: number) => boolean): number {
   if (!existsSync(dir)) return 0;
+  const cutoff = now - graceMs;
   let removed = 0;
   for (const name of readdirSync(dir)) {
-    const match = FILE_PATTERN.exec(name);
-    if (!match) continue;
+    const id = FILE_PATTERN.exec(name)?.[1];
+    if (id ? referencedIds.has(id) : !TEMP_PATTERN.test(name)) continue;
     const path = join(dir, name);
     const stat = statSync(path, { throwIfNoEntry: false });
-    if (!stat || !shouldRemove(match[1], stat.mtimeMs)) continue;
+    if (!stat || stat.mtimeMs >= cutoff) continue;
     rmSync(path, { force: true });
     removed++;
   }

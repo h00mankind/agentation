@@ -88,7 +88,8 @@ import {
   originalRequestAnimationFrame,
 } from "../../utils/freeze-animations";
 
-import type { Annotation } from "../../types";
+import type { Annotation, Attachment } from "../../types";
+import { omitAttachmentPaths, redactAttachmentPaths } from "../../utils/attachments";
 import { generateOutput, generateOutputHeader } from "../../utils/generate-output";
 import { captureElementAttributes, DEFAULT_IDENTIFYING_ATTRIBUTES } from "../../utils/element-attributes";
 import { formatCopyOutput, type CopyFormat } from "../../utils/copy-format";
@@ -773,6 +774,7 @@ function PageFeedbackToolbarForRoute({
   const [connectionStatus, setConnectionStatus] = useState<
     "disconnected" | "connecting" | "connected"
   >(endpoint ? "connecting" : "disconnected");
+  const attachmentEndpoint = connectionStatus === "connected" ? endpoint : undefined;
 
   // Draggable toolbar state
   const [toolbarPosition, setToolbarPosition] = useState<{
@@ -2626,7 +2628,7 @@ function PageFeedbackToolbarForRoute({
             url:
               typeof window !== "undefined" ? window.location.href : undefined,
             ...payload,
-          }),
+          }, omitAttachmentPaths),
         });
         return response.ok;
       } catch (error) {
@@ -2639,7 +2641,7 @@ function PageFeedbackToolbarForRoute({
 
   // Add annotation
   const addAnnotation = useCallback(
-    (comment: string) => {
+    (comment: string, attachments: Attachment[]) => {
       if (!pendingAnnotation || pendingAnnotation.isSubmitted) return;
 
       const newAnnotation: Annotation = {
@@ -2665,6 +2667,7 @@ function PageFeedbackToolbarForRoute({
         attributes: pendingAnnotation.attributes,
         frame: pendingAnnotation.frame,
         elementBoundingBoxes: pendingAnnotation.elementBoundingBoxes,
+        ...(attachments.length ? { attachments } : {}),
         // Protocol fields for server sync
         ...(endpoint && currentSessionId
           ? {
@@ -2841,10 +2844,16 @@ function PageFeedbackToolbarForRoute({
 
   // Update annotation (edit mode submit)
   const updateAnnotation = useCallback(
-    (newComment: string) => {
+    (newComment: string, attachments: Attachment[]) => {
       if (!editingAnnotation) return;
 
-      const updatedAnnotation = { ...editingAnnotation, comment: newComment };
+      const previousIds = (editingAnnotation.attachments ?? []).map((a) => a.id).join();
+      const attachmentsChanged = attachments.map((a) => a.id).join() !== previousIds;
+      const updatedAnnotation: Annotation = {
+        ...editingAnnotation,
+        comment: newComment,
+        attachments: attachments.length ? attachments : undefined,
+      };
       setEditingAnnotation(updatedAnnotation);
 
       setAnnotations((prev) =>
@@ -2861,6 +2870,7 @@ function PageFeedbackToolbarForRoute({
       if (endpoint) {
         routeTask(() => updateAnnotationOnServer(endpoint, serverIds.current.get(editingAnnotation.id) ?? editingAnnotation.id, {
           comment: newComment,
+          ...(attachmentsChanged ? { attachments } : {}),
         })).catch((error) => {
           console.warn(
             "[Agentation] Failed to update annotation on server:",
@@ -3249,7 +3259,11 @@ function PageFeedbackToolbarForRoute({
 
     // Fire webhook and check result (force=true to bypass webhooksEnabled check for manual sends)
     const webhookOk = hasWebhookTarget
-      ? await fireWebhook("submit", { output, annotations, url: submissionUrl }, true)
+      ? await fireWebhook("submit", {
+          output: redactAttachmentPaths(output, annotations),
+          annotations,
+          url: submissionUrl,
+        }, true)
       : true;
     // Without a webhook target, onSubmit is the delivery mechanism — don't
     // report the webhook no-op as a failure.
@@ -4621,6 +4635,7 @@ function PageFeedbackToolbarForRoute({
                           onOpenSource={onOpenSource && pendingAnnotation.sourceFile
                             ? () => onOpenSource(pendingAnnotation.sourceFile!) : undefined}
                           computedStyles={pendingAnnotation.computedStylesObj}
+                          attachmentEndpoint={attachmentEndpoint}
                           placeholder={
                             typeof copyFormat === "object" && pendingAnnotation.attributes?.[copyFormat.attribute]
                               ? "Add a note (optional)"
@@ -4780,6 +4795,8 @@ function PageFeedbackToolbarForRoute({
               onOpenSource: onOpenSource && cardAnnotation.sourceFile
                 ? () => onOpenSource(cardAnnotation.sourceFile!) : undefined,
               computedStyles: parseComputedStylesString(cardAnnotation.computedStyles),
+              attachmentEndpoint,
+              initialAttachments: cardAnnotation.attachments,
               placeholder: "Edit your feedback...",
               initialValue: cardAnnotation.comment,
               submitLabel: "Save",

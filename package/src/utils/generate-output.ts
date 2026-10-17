@@ -31,6 +31,13 @@ export function generateOutputHeader(pathname: string, appName?: string): string
   return output;
 }
 
+function referenceImages(annotation: Annotation, indent = ""): string {
+  if (!annotation.attachments?.length) return "";
+  return `${indent}Reference images:\n` + annotation.attachments
+    .map((image) => `${indent}- ${image.path} (${image.width}×${image.height})\n`)
+    .join("");
+}
+
 export function generateOutput(
   annotations: Annotation[],
   pathname: string,
@@ -67,7 +74,7 @@ export function generateOutput(
       if (a.selectedText) {
         output += ` (re: "${a.selectedText.slice(0, 30)}${a.selectedText.length > 30 ? "..." : ""}")`;
       }
-      output += "\n";
+      output += "\n" + referenceImages(a, "   ");
     } else if (detailLevel === "forensic") {
       output += `### ${i + 1}. ${a.element}\n`;
       if (a.isMultiSelect && a.fullPath) {
@@ -104,7 +111,7 @@ export function generateOutput(
       if (a.reactComponents) {
         output += `**React:** ${a.reactComponents}\n`;
       }
-      output += `**Feedback:** ${a.comment}\n\n`;
+      output += `**Feedback:** ${a.comment}\n${referenceImages(a)}\n`;
     } else {
       // standard and detailed
       output += `### ${i + 1}. ${a.element}\n`;
@@ -129,7 +136,7 @@ export function generateOutput(
       if (detailLevel === "detailed" && a.nearbyText && !a.selectedText) {
         output += `**Context:** ${a.nearbyText.slice(0, 100)}\n`;
       }
-      output += `**Feedback:** ${a.comment}\n\n`;
+      output += `**Feedback:** ${a.comment}\n${referenceImages(a)}\n`;
     }
   });
 

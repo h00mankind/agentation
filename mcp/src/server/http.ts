@@ -299,14 +299,13 @@ async function proxyToCloud(
     headers["Content-Type"] = req.headers["content-type"];
   }
 
-  let body: string | undefined;
+  let body: Uint8Array<ArrayBuffer> | undefined;
   if (method !== "GET" && method !== "HEAD") {
-    body = await new Promise<string>((resolve, reject) => {
-      let data = "";
-      req.on("data", (chunk) => (data += chunk));
-      req.on("end", () => resolve(data));
-      req.on("error", reject);
-    });
+    try {
+      body = new Uint8Array(await readBody(req, MAX_ATTACHMENT_BYTES));
+    } catch (err) {
+      return sendRequestError(res, err);
+    }
   }
 
   try {

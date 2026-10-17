@@ -161,6 +161,27 @@ test('CORS remains local when JSON and SSE are proxied to cloud', async t => {
   }
 });
 
+test('cloud proxy forwards upload bytes unchanged and answers 413 past the attachment cap', async t => {
+  const base = await server(t);
+  const forwarded = [];
+  const originalFetch = global.fetch;
+  t.mock.method(global, 'fetch', (url, init) => {
+    if (!String(url).startsWith('https://agentation-mcp-cloud.vercel.app/')) return originalFetch(url, init);
+    forwarded.push(init.body);
+    return Promise.resolve(new Response('{}', { headers:{'Content-Type':'application/json'} }));
+  });
+  setCloudApiKey('local-test-only');
+  t.after(() => setCloudApiKey(undefined));
+  const bytes = Buffer.from(Array.from({ length: 4096 }, (_, i) => i % 256));
+  const uploaded = await request(base, '/attachments', { method:'POST', headers:{'Content-Type':'image/png'}, body: bytes });
+  assert.equal(uploaded.status, 200); await uploaded.text();
+  assert.equal(forwarded.length, 1);
+  assert.deepEqual(Buffer.from(forwarded[0]), bytes);
+  const oversized = await request(base, '/attachments', { method:'POST', headers:{'Content-Type':'image/png'}, body: Buffer.alloc(2 * 1024 * 1024 + 1) });
+  assert.equal(oversized.status, 413); await oversized.text();
+  assert.equal(forwarded.length, 1, 'oversized upload reached the cloud');
+});
+
 test('loopback-only default rejects foreign Host headers and keeps local ones', async t => {
   const base = await server(t, null);
   const port = new URL(base).port;

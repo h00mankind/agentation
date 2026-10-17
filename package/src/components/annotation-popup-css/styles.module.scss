@@ -377,7 +377,16 @@
   border-radius: 6px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.05);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+
+  // Drawn over the image so light thumbnails keep an edge on a light popup.
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+    pointer-events: none;
+  }
 
   img {
     display: block;
@@ -403,6 +412,7 @@
 
 .attachmentRemove {
   position: absolute;
+  z-index: 1;
   top: 2px;
   right: 2px;
   display: flex;
@@ -522,7 +532,10 @@
 
   .attachment {
     background: rgba(0, 0, 0, 0.03);
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+
+    &::after {
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+    }
   }
 
   .attachmentChip {

@@ -6,3 +6,4 @@ export { getStore, clearAll } from "../src/server/store";
 export { createWebhookDispatcher } from "../src/server/webhooks";
 export { createCorsPolicy } from "../src/server/cors";
 export { integerEnv, MAX_TIMER_MS } from "../src/server/config";
+export * from "../src/server/attachments";

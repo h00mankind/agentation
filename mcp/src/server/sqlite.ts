@@ -4,11 +4,10 @@
  */
 
 import Database from "better-sqlite3";
-import { integerEnv } from "./config.js";
+import { getDataDir, integerEnv } from "./config.js";
 import { createHash, randomBytes } from "crypto";
 import { mkdirSync, existsSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import type {
   AFSStore,
   AFSEvent,
@@ -32,7 +31,7 @@ import { eventBus } from "./events.js";
 // -----------------------------------------------------------------------------
 
 function getDbPath(): string {
-  const dataDir = join(homedir(), ".agentation");
+  const dataDir = getDataDir();
   if (!existsSync(dataDir)) {
     mkdirSync(dataDir, { recursive: true });
   }
@@ -220,6 +219,7 @@ function rowToAnnotation(row: Record<string, unknown>): Annotation {
     sourceFile: row.source_file as string | undefined,
     ...(extra?.attributes ? { attributes: extra.attributes } : {}),
     ...(extra?.frame ? { frame: extra.frame } : {}),
+    ...(extra?.attachments ? { attachments: extra.attachments } : {}),
     kind,
     ...(kind === "placement" && extra?.placement ? { placement: extra.placement } : {}),
     ...(kind === "rearrange" && extra?.rearrange ? { rearrange: extra.rearrange } : {}),
@@ -353,6 +353,7 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
     getAnnotationsBySession: db.prepare("SELECT * FROM annotations WHERE session_id = ? ORDER BY timestamp"),
     getPendingAnnotations: db.prepare("SELECT * FROM annotations WHERE session_id = ? AND status = 'pending' ORDER BY timestamp"),
     deleteAnnotation: db.prepare("DELETE FROM annotations WHERE id = ?"),
+    annotationsWithAttachments: db.prepare("SELECT extra FROM annotations WHERE extra LIKE '%\"attachments\"%'"),
     updateAnnotation: db.prepare(`
       UPDATE annotations SET
         comment = COALESCE(@comment, comment),
@@ -465,6 +466,7 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
         ...(annotation.rearrange ? { rearrange: annotation.rearrange } : {}),
         ...(annotation.attributes ? { attributes: annotation.attributes } : {}),
         ...(annotation.frame ? { frame: annotation.frame } : {}),
+        ...(annotation.attachments ? { attachments: annotation.attachments } : {}),
       };
       const extraJson = Object.keys(extra).length ? JSON.stringify(extra) : null;
 
@@ -533,11 +535,12 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
         sourceFile: data.sourceFile ?? null,
         x: data.x ?? null,
         y: data.y ?? null,
-        extra: data.placement || data.rearrange || data.attributes || data.frame ? JSON.stringify({
+        extra: data.placement || data.rearrange || data.attributes || data.frame || data.attachments !== undefined ? JSON.stringify({
           placement: data.placement ?? existing.placement,
           rearrange: data.rearrange ?? existing.rearrange,
           attributes: data.attributes ?? existing.attributes,
           frame: data.frame ?? existing.frame,
+          attachments: data.attachments ?? existing.attachments,
         }) : null,
       });
 
@@ -607,6 +610,15 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
       }
 
       return existing;
+    },
+
+    referencedAttachmentIds(): Set<string> {
+      const ids = new Set<string>();
+      const rows = stmts.annotationsWithAttachments.all() as { extra: string }[];
+      for (const { extra } of rows) {
+        for (const attachment of JSON.parse(extra).attachments ?? []) ids.add(attachment.id);
+      }
+      return ids;
     },
 
     // Events

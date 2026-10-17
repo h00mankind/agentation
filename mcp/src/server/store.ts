@@ -272,6 +272,14 @@ function createMemoryStore(): AFSStore {
       return annotation;
     },
 
+    referencedAttachmentIds(): Set<string> {
+      const ids = new Set<string>();
+      for (const annotation of annotations.values()) {
+        for (const attachment of annotation.attachments ?? []) ids.add(attachment.id);
+      }
+      return ids;
+    },
+
     getEventsSince(sessionId: string, sequence: number): AFSEvent[] {
       cleanupEvents();
       return events.filter(
@@ -363,6 +371,10 @@ export function getSessionAnnotations(sessionId: string): Annotation[] {
 
 export function deleteAnnotation(id: string): Annotation | undefined {
   return getStore().deleteAnnotation(id);
+}
+
+export function referencedAttachmentIds(): Set<string> {
+  return getStore().referencedAttachmentIds();
 }
 
 export function getEventsSince(sessionId: string, sequence: number): AFSEvent[] {

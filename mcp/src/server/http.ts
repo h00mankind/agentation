@@ -23,12 +23,28 @@ import {
   getPendingAnnotations,
   addThreadMessage,
   getEventsSince,
+  referencedAttachmentIds,
 } from "./store.js";
 import { eventBus } from "./events.js";
 import { isLoopbackAddress, isLoopbackHost, isLocalHostHeader } from "./network.js";
 import { createCorsPolicy } from "./cors.js";
 import { createWebhookDispatcher, type WebhookDispatcher } from "./webhooks.js";
-import type { Annotation, AFSEvent, ActionRequest } from "../types.js";
+import {
+  ATTACHMENT_ORPHAN_GRACE_MS,
+  MAX_ATTACHMENT_BYTES,
+  attachmentsDir,
+  gcAttachments,
+  isAttachmentId,
+  parseAttachments,
+  readAttachment,
+  releaseAttachments,
+  toWebhookAnnotation,
+  writeAttachment,
+} from "./attachments.js";
+import type { Annotation, AFSEvent, ActionRequest, Attachment } from "../types.js";
+
+const MAX_JSON_BODY_BYTES = 1024 * 1024;
+const INVALID_ATTACHMENTS_MESSAGE = "attachments must be up to 4 PNG or JPEG references";
 
 /**
  * Log to stderr so diagnostic output never corrupts the MCP stdio channel.
@@ -150,7 +166,10 @@ function sendWebhooks(actionRequest: ActionRequest, dispatcher: WebhookDispatche
     return;
   }
 
-  const payload = JSON.stringify(actionRequest);
+  const payload = JSON.stringify({
+    ...actionRequest,
+    annotations: actionRequest.annotations.map(toWebhookAnnotation),
+  });
 
   for (const url of webhookUrls) {
     void dispatcher.send(url, payload).then((result) => {
@@ -169,22 +188,64 @@ function sendWebhooks(actionRequest: ActionRequest, dispatcher: WebhookDispatche
 // Request Helpers
 // -----------------------------------------------------------------------------
 
+class PayloadTooLargeError extends Error {}
+
+/**
+ * Buffer the request body up to maxBytes. Past the cap nothing more is kept:
+ * the rest is discarded so the client can still read the 413 response.
+ */
+function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const onData = (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        chunks.length = 0;
+        req.removeListener("data", onData);
+        req.resume();
+        reject(new PayloadTooLargeError(`Request body exceeds ${maxBytes} bytes`));
+        return;
+      }
+      chunks.push(chunk);
+    };
+    req.on("data", onData);
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
 /**
  * Parse JSON body from request.
  */
 async function parseBody<T>(req: IncomingMessage): Promise<T> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk) => (body += chunk));
-    req.on("end", () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch {
-        reject(new Error("Invalid JSON"));
-      }
-    });
-    req.on("error", reject);
-  });
+  const raw = await readBody(req, MAX_JSON_BODY_BYTES);
+  try {
+    return raw.length ? JSON.parse(raw.toString("utf8")) : ({} as T);
+  } catch {
+    throw new Error("Invalid JSON");
+  }
+}
+
+/** Map a body-reading or validation failure to its HTTP status. */
+function sendRequestError(res: ServerResponse, err: unknown): void {
+  if (err instanceof PayloadTooLargeError) {
+    // Closing after the 413 stops the client from sending the rest of an oversized upload.
+    res.writeHead(413, { "Content-Type": "application/json", Connection: "close" });
+    res.end(JSON.stringify({ error: err.message }));
+    return;
+  }
+  sendError(res, 400, (err as Error).message);
+}
+
+/**
+ * Split attachments off a request body. Returns {} when the field is absent,
+ * or null when it is present but malformed.
+ */
+function readAttachments(body: { attachments?: unknown }): { attachments?: Attachment[] } | null {
+  if (body.attachments === undefined) return {};
+  const attachments = parseAttachments(body.attachments, attachmentsDir());
+  return attachments ? { attachments } : null;
 }
 
 /**
@@ -319,7 +380,7 @@ const createSessionHandler: RouteHandler = async (req, res) => {
     const session = createSession(body.url, body.projectId);
     sendJson(res, 201, session);
   } catch (err) {
-    sendError(res, 400, (err as Error).message);
+    sendRequestError(res, err);
   }
 };
 
@@ -355,7 +416,12 @@ const addAnnotationHandler: RouteHandler = async (req, res, params) => {
       return sendError(res, 400, "comment, element, and elementPath are required");
     }
 
-    const annotation = addAnnotation(params.id, body);
+    const attachments = readAttachments(body);
+    if (!attachments) {
+      return sendError(res, 400, INVALID_ATTACHMENTS_MESSAGE);
+    }
+
+    const annotation = addAnnotation(params.id, { ...body, ...attachments });
 
     if (!annotation) {
       return sendError(res, 404, "Session not found");
@@ -363,7 +429,7 @@ const addAnnotationHandler: RouteHandler = async (req, res, params) => {
 
     sendJson(res, 201, annotation);
   } catch (err) {
-    sendError(res, 400, (err as Error).message);
+    sendRequestError(res, err);
   }
 };
 
@@ -380,10 +446,16 @@ const updateAnnotationHandler: RouteHandler = async (req, res, params) => {
       return sendError(res, 404, "Annotation not found");
     }
 
-    const annotation = updateAnnotation(params.id, body);
+    // Absent attachments leave the stored list alone (the store merges by key).
+    const attachments = readAttachments(body);
+    if (!attachments) {
+      return sendError(res, 400, INVALID_ATTACHMENTS_MESSAGE);
+    }
+
+    const annotation = updateAnnotation(params.id, { ...body, ...attachments });
     sendJson(res, 200, annotation);
   } catch (err) {
-    sendError(res, 400, (err as Error).message);
+    sendRequestError(res, err);
   }
 };
 
@@ -409,6 +481,9 @@ const deleteAnnotationHandler: RouteHandler = async (_req, res, params) => {
   if (!annotation) {
     return sendError(res, 404, "Annotation not found");
   }
+
+  // Files stay on disk while another annotation still references them.
+  releaseAttachments(attachmentsDir(), annotation.attachments ?? [], referencedAttachmentIds());
 
   sendJson(res, 200, { deleted: true, annotationId: params.id });
 };
@@ -485,7 +560,7 @@ const requestActionHandler: RouteHandler = async (req, res, params, webhookDispa
       },
     });
   } catch (err) {
-    sendError(res, 400, (err as Error).message);
+    sendRequestError(res, err);
   }
 };
 
@@ -508,8 +583,52 @@ const addThreadHandler: RouteHandler = async (req, res, params) => {
 
     sendJson(res, 201, annotation);
   } catch (err) {
-    sendError(res, 400, (err as Error).message);
+    sendRequestError(res, err);
   }
+};
+
+/**
+ * POST /attachments - Store a PNG or JPEG reference image.
+ *
+ * The body is the raw image. The id is the sha256 of the bytes, so re-uploading
+ * the same image returns the existing record with 200 instead of 201.
+ */
+const uploadAttachmentHandler: RouteHandler = async (req, res) => {
+  let bytes: Buffer;
+  try {
+    bytes = await readBody(req, MAX_ATTACHMENT_BYTES);
+  } catch (err) {
+    return sendRequestError(res, err);
+  }
+
+  const stored = writeAttachment(attachmentsDir(), bytes);
+  if (!stored) {
+    return sendError(res, 415, "Unsupported media type: expected a PNG or JPEG image");
+  }
+
+  sendJson(res, stored.created ? 201 : 200, stored.attachment);
+};
+
+/**
+ * GET /attachments/:id - Return the stored image bytes.
+ */
+const getAttachmentHandler: RouteHandler = async (_req, res, params) => {
+  if (!isAttachmentId(params.id)) {
+    return sendError(res, 400, "Attachment id must be 64 lowercase hex characters");
+  }
+
+  const found = readAttachment(attachmentsDir(), params.id);
+  if (!found) {
+    return sendError(res, 404, "Attachment not found");
+  }
+
+  res.writeHead(200, {
+    "Content-Type": found.mimeType,
+    "Content-Length": found.bytes.length,
+    // The URL is the content hash, so the bytes can never change under it.
+    "Cache-Control": "private, max-age=31536000, immutable",
+  });
+  res.end(found.bytes);
 };
 
 /**
@@ -878,6 +997,18 @@ const routes: Route[] = [
     handler: addThreadHandler,
     paramNames: ["id"],
   },
+  {
+    method: "POST",
+    pattern: /^\/attachments$/,
+    handler: uploadAttachmentHandler,
+    paramNames: [],
+  },
+  {
+    method: "GET",
+    pattern: /^\/attachments\/([^/]+)$/,
+    handler: getAttachmentHandler,
+    paramNames: ["id"],
+  },
 ];
 
 /**
@@ -907,6 +1038,19 @@ function matchRoute(
 // -----------------------------------------------------------------------------
 
 /**
+ * Startup cleanup of attachment files no annotation references. A failure here
+ * must not stop the server.
+ */
+function collectStaleAttachments(): void {
+  try {
+    const removed = gcAttachments(attachmentsDir(), referencedAttachmentIds(), ATTACHMENT_ORPHAN_GRACE_MS);
+    if (removed > 0) log(`[Attachments] Removed ${removed} stale attachment file(s)`);
+  } catch (err) {
+    log(`[Attachments] Startup cleanup failed: ${(err as Error).message}`);
+  }
+}
+
+/**
  * Create and start the HTTP server.
  * @param port - Port to listen on
  * @param apiKey - Optional API key for cloud storage mode
@@ -925,6 +1069,9 @@ export function startHttpServer(
   // Set cloud mode if API key provided
   if (apiKey) {
     setCloudApiKey(apiKey);
+  }
+  if (!isCloudMode()) {
+    collectStaleAttachments();
   }
 
   const server = createServer(async (req, res) => {

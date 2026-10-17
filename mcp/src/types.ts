@@ -29,6 +29,9 @@ export type Annotation = {
     boundingBox: { x: number; y: number; width: number; height: number };
   };
 
+  // Reference images attached in the popup (max 4)
+  attachments?: Attachment[];
+
   // Annotation kind (defaults to "feedback" when undefined — backward compat)
   kind?: "feedback" | "placement" | "rearrange";
 
@@ -62,6 +65,18 @@ export type Annotation = {
   resolvedAt?: string;
   resolvedBy?: "human" | "agent";
   authorId?: string;
+};
+
+// -----------------------------------------------------------------------------
+// Attachments
+// -----------------------------------------------------------------------------
+
+export type Attachment = {
+  id: string; // sha256 hex of the stored bytes (64 lowercase hex chars)
+  mimeType: "image/png" | "image/jpeg";
+  width: number;
+  height: number;
+  path: string; // absolute path on the machine that wrote the file
 };
 
 // -----------------------------------------------------------------------------
@@ -211,6 +226,9 @@ export interface AFSStore {
   getPendingAnnotations(sessionId: string): Annotation[];
   getSessionAnnotations(sessionId: string): Annotation[];
   deleteAnnotation(id: string): Annotation | undefined;
+
+  // Attachment ids referenced by any annotation (drives file cleanup)
+  referencedAttachmentIds(): Set<string>;
 
   // Events (for replay on reconnect)
   getEventsSince(sessionId: string, sequence: number): AFSEvent[];

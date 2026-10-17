@@ -167,3 +167,38 @@ test('annotations carry attachments with server paths and reject malformed refer
   assert.deepEqual(patched.attachments, created.attachments);
   assert.equal(existsSync(fileFor(stored.id, 'png')), true);
 });
+
+test('webhook payloads carry attachment metadata but never the local path', async t => {
+  const { createServer } = require('node:http');
+  const received = new Promise(resolve => {
+    const receiver = createServer((req, res) => {
+      let body = '';
+      req.on('data', chunk => (body += chunk));
+      req.on('end', () => {
+        res.writeHead(200).end();
+        resolve(JSON.parse(body));
+      });
+    });
+    receiver.listen(0, '127.0.0.1', () => {
+      process.env.AGENTATION_WEBHOOK_URL = `http://127.0.0.1:${receiver.address().port}/hook`;
+      t.after(() => { receiver.close(); delete process.env.AGENTATION_WEBHOOK_URL; });
+    });
+  });
+
+  const base = await server(t);
+  const stored = await (await upload(base, png(6, 4))).json();
+  const s = await session(base);
+  const created = await (await fetch(`${base}/sessions/${s.id}/annotations`, json(note({ attachments: [stored] })))).json();
+  assert.equal(created.attachments[0].path, fileFor(stored.id, 'png'));
+
+  const action = await fetch(`${base}/sessions/${s.id}/action`, json({ output: 'Fix it' }));
+  assert.equal(action.status, 200);
+  await action.text();
+
+  const payload = await Promise.race([
+    received,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('webhook not delivered')), 5000)),
+  ]);
+  assert.deepEqual(payload.annotations[0].attachments, [{ id: stored.id, mimeType: 'image/png', width: 6, height: 4 }]);
+  assert.equal(JSON.stringify(payload).includes(attachmentsDir), false);
+});

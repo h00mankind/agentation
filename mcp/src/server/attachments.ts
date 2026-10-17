@@ -142,6 +142,36 @@ export function parseAttachments(raw: unknown, dir: string): Attachment[] | null
   return parsed;
 }
 
+/**
+ * Local path for a reference that came from a server. Returns null for anything
+ * that is not a well-formed id and mime type, so a bad value can never reach the filename.
+ */
+export function localAttachmentPath(reference: { id: unknown; mimeType: unknown }): string | null {
+  if (!isAttachmentId(reference.id) || !isMimeType(reference.mimeType)) return null;
+  return attachmentPath(attachmentsDir(), reference.id, reference.mimeType);
+}
+
+/**
+ * Stores bytes fetched from an HTTP server. They are written only when they hash
+ * to the expected id and sniff as the expected type; otherwise nothing is written.
+ */
+export function storeFetchedAttachment(
+  dir: string,
+  id: string,
+  mimeType: MimeType,
+  bytes: Buffer,
+): string | null {
+  if (!isAttachmentId(id) || attachmentId(bytes) !== id) return null;
+  if (sniffImage(bytes)?.mimeType !== mimeType) return null;
+
+  const path = attachmentPath(dir, id, mimeType);
+  mkdirSync(dir, { recursive: true });
+  const temp = join(dir, `.${id}.${randomBytes(6).toString("hex")}.tmp`);
+  writeFileSync(temp, bytes);
+  renameSync(temp, path);
+  return path;
+}
+
 function isMimeType(value: unknown): value is MimeType {
   return value === "image/png" || value === "image/jpeg";
 }

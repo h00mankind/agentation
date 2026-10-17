@@ -12,8 +12,10 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { existsSync } from "fs";
 import { z } from "zod";
 import type { ActionRequest } from "../types.js";
+import { attachmentsDir, localAttachmentPath, storeFetchedAttachment } from "./attachments.js";
 
 // -----------------------------------------------------------------------------
 // Configuration
@@ -323,6 +325,16 @@ type Annotation = {
     originalRect: { x: number; y: number; width: number; height: number };
     currentRect: { x: number; y: number; width: number; height: number };
   };
+  attachments?: AttachmentRef[];
+};
+
+// `path` is present only when the file could be made available on this machine.
+type AttachmentRef = {
+  id: string;
+  mimeType: "image/png" | "image/jpeg";
+  width: number;
+  height: number;
+  path?: string;
 };
 
 type SessionWithAnnotations = Session & {
@@ -333,6 +345,64 @@ type PendingResponse = {
   count: number;
   annotations: Annotation[];
 };
+
+const ATTACHMENT_FETCH_TIMEOUT_MS = 10_000;
+
+async function fetchAttachmentBytes(id: string): Promise<Buffer | null> {
+  const headers: Record<string, string> = {};
+  if (apiKey) {
+    headers["x-api-key"] = apiKey;
+  }
+  try {
+    const res = await fetch(`${httpBaseUrl}/attachments/${id}`, {
+      headers,
+      signal: AbortSignal.timeout(ATTACHMENT_FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    return Buffer.from(await res.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Makes attachments readable from this machine. A file already present locally
+ * is reused. A missing one is fetched from the HTTP server and kept only if it
+ * matches its id. If that fails, the reference keeps its metadata and loses its path.
+ */
+async function localizeAttachments(annotations: Annotation[]): Promise<Annotation[]> {
+  const materialized = new Map<string, Promise<string | null>>();
+
+  const pathFor = (ref: AttachmentRef): Promise<string | null> => {
+    const key = `${ref.id}:${ref.mimeType}`;
+    let pending = materialized.get(key);
+    if (!pending) {
+      pending = (async () => {
+        const path = localAttachmentPath(ref);
+        if (!path) return null;
+        if (existsSync(path)) return path;
+        const bytes = await fetchAttachmentBytes(ref.id);
+        if (!bytes) return null;
+        return storeFetchedAttachment(attachmentsDir(), ref.id, ref.mimeType, bytes);
+      })();
+      materialized.set(key, pending);
+    }
+    return pending;
+  };
+
+  return Promise.all(
+    annotations.map(async (annotation) => {
+      if (!annotation.attachments?.length) return annotation;
+      const attachments = await Promise.all(
+        annotation.attachments.map(async ({ path: _serverPath, ...ref }) => {
+          const path = await pathFor(ref as AttachmentRef);
+          return path ? { ...ref, path } : ref;
+        }),
+      );
+      return { ...annotation, attachments };
+    }),
+  );
+}
 
 /** Map an annotation to the shape returned by MCP tools */
 function mapAnnotationForMcp(a: Annotation) {
@@ -353,6 +423,7 @@ function mapAnnotationForMcp(a: Annotation) {
     ...(a.frame ? { frame: a.frame } : {}),
     ...(a.kind === "placement" && a.placement ? { placement: a.placement } : {}),
     ...(a.kind === "rearrange" && a.rearrange ? { rearrange: a.rearrange } : {}),
+    ...(a.attachments?.length ? { attachments: a.attachments } : {}),
   };
 }
 
@@ -577,7 +648,7 @@ export async function handleTool(name: string, args: unknown, signal?: AbortSign
       const { sessionId } = GetSessionSchema.parse(args);
       try {
         const session = await httpGet<SessionWithAnnotations>(`/sessions/${sessionId}`);
-        return success(session);
+        return success({ ...session, annotations: await localizeAttachments(session.annotations) });
       } catch (err) {
         if ((err as Error).message.includes("404")) {
           return error(`Session not found: ${sessionId}`);
@@ -591,7 +662,7 @@ export async function handleTool(name: string, args: unknown, signal?: AbortSign
       const response = await httpGet<PendingResponse>(`/sessions/${sessionId}/pending`);
       return success({
         count: response.count,
-        annotations: response.annotations.map(mapAnnotationForMcp),
+        annotations: (await localizeAttachments(response.annotations)).map(mapAnnotationForMcp),
       });
     }
 
@@ -599,7 +670,7 @@ export async function handleTool(name: string, args: unknown, signal?: AbortSign
       const response = await httpGet<PendingResponse>("/pending");
       return success({
         count: response.count,
-        annotations: response.annotations.map(mapAnnotationForMcp),
+        annotations: (await localizeAttachments(response.annotations)).map(mapAnnotationForMcp),
       });
     }
 
@@ -694,7 +765,7 @@ export async function handleTool(name: string, args: unknown, signal?: AbortSign
             timeout: false,
             count: pending.count,
             sessions,
-            annotations: pending.annotations.map(mapAnnotationForMcp),
+            annotations: (await localizeAttachments(pending.annotations)).map(mapAnnotationForMcp),
           });
         }
       } catch (err) {
@@ -715,7 +786,7 @@ export async function handleTool(name: string, args: unknown, signal?: AbortSign
             timeout: false,
             count: result.annotations.length,
             sessions: result.sessions,
-            annotations: result.annotations.map(mapAnnotationForMcp),
+            annotations: (await localizeAttachments(result.annotations)).map(mapAnnotationForMcp),
           });
         case "timeout":
           return success({

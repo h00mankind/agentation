@@ -453,6 +453,11 @@ const updateAnnotationHandler: RouteHandler = async (req, res, params) => {
     }
 
     const annotation = updateAnnotation(params.id, { ...body, ...attachments });
+    if (attachments.attachments) {
+      const kept = new Set(attachments.attachments.map(attachment => attachment.id));
+      const dropped = (existing.attachments ?? []).filter(attachment => !kept.has(attachment.id));
+      releaseAttachments(attachmentsDir(), dropped, referencedAttachmentIds());
+    }
     sendJson(res, 200, annotation);
   } catch (err) {
     sendRequestError(res, err);

@@ -168,6 +168,41 @@ test('annotations carry attachments with server paths and reject malformed refer
   assert.equal(existsSync(fileFor(stored.id, 'png')), true);
 });
 
+test('patching attachments removes files the annotation dropped and keeps the rest', async t => {
+  const base = await server(t);
+  const kept = await (await upload(base, png(10, 10))).json();
+  const dropped = await (await upload(base, png(20, 20))).json();
+  const s = await session(base);
+  const created = await (await fetch(`${base}/sessions/${s.id}/annotations`, json(note({ attachments: [kept, dropped] })))).json();
+
+  const res = await fetch(`${base}/annotations/${created.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attachments: [kept] }),
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).attachments.map(a => a.id), [kept.id]);
+  assert.equal(existsSync(fileFor(dropped.id, 'png')), false);
+  assert.equal(existsSync(fileFor(kept.id, 'png')), true);
+});
+
+test('patching away an attachment another annotation still uses keeps its file', async t => {
+  const base = await server(t);
+  const shared = await (await upload(base, png(30, 30))).json();
+  const s = await session(base);
+  const first = await (await fetch(`${base}/sessions/${s.id}/annotations`, json(note({ attachments: [shared] })))).json();
+  await fetch(`${base}/sessions/${s.id}/annotations`, json(note({ attachments: [shared] })));
+
+  const res = await fetch(`${base}/annotations/${first.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attachments: [] }),
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual((await res.json()).attachments, []);
+  assert.equal(existsSync(fileFor(shared.id, 'png')), true);
+});
+
 test('webhook payloads carry attachment metadata but never the local path', async t => {
   const { createServer } = require('node:http');
   const received = new Promise(resolve => {

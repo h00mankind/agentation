@@ -103,6 +103,17 @@ test('MCP initialize and session deletion retain the same CORS policy', async t 
   assert.equal(deleted.headers.get('access-control-allow-origin'), 'https://app.example.test');
 });
 
+test('an MCP request body over 1 MiB is rejected with 413 and no session is created', async t => {
+  const base = await server(t);
+  const body = JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-03-26',capabilities:{},clientInfo:{name:'oversized',version:'1'},padding:'x'.repeat(1024*1024)}});
+  const response = await request(base, '/mcp', {
+    method:'POST', headers:{'Content-Type':'application/json',Accept:'application/json, text/event-stream'}, body,
+  });
+  assert.equal(response.status, 413);
+  assert.equal(response.headers.get('mcp-session-id'), null);
+  assert.match((await response.json()).error, /exceeds/);
+});
+
 test('real HTTP action returns while its webhook is pending, then retries once', { timeout: 3000 }, async t => {
   const { createServer } = require('node:http');
   let firstResponse, firstArrived, delivered;

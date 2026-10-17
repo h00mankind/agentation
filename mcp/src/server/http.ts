@@ -815,6 +815,13 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse): Promise<voi
 
   // POST: Handle JSON-RPC requests
   if (method === "POST") {
+    let raw: Buffer;
+    try {
+      raw = await readBody(req, MAX_JSON_BODY_BYTES);
+    } catch (err) {
+      return sendRequestError(res, err);
+    }
+
     let transport: StreamableHTTPServerTransport;
     let created: { isClosed: () => boolean } | null = null;
 
@@ -838,15 +845,7 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse): Promise<voi
     }
 
     try {
-      // Read the request body
-      const body = await new Promise<string>((resolve, reject) => {
-        let data = "";
-        req.on("data", (chunk) => (data += chunk));
-        req.on("end", () => resolve(data));
-        req.on("error", reject);
-      });
-
-      const parsedBody = body ? JSON.parse(body) : undefined;
+      const parsedBody = raw.length ? JSON.parse(raw.toString("utf8")) : undefined;
 
       // Handle the request through the transport (it writes directly to res)
       await transport.handleRequest(req, res, parsedBody);

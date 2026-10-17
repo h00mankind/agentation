@@ -227,6 +227,9 @@ export interface AFSStore {
   getSessionAnnotations(sessionId: string): Annotation[];
   deleteAnnotation(id: string): Annotation | undefined;
 
+  // Attachment ids referenced by any annotation (drives file cleanup)
+  referencedAttachmentIds(): Set<string>;
+
   // Events (for replay on reconnect)
   getEventsSince(sessionId: string, sequence: number): AFSEvent[];
 

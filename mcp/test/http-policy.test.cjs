@@ -6,6 +6,8 @@ const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const directory = mkdtempSync(join(tmpdir(), 'agentation-http-policy-'));
 process.env.AGENTATION_TEST_DB_PATH = join(directory, 'test.db');
+// Startup attachment cleanup reads HOME per call, so keep it out of the real ~/.agentation.
+process.env.HOME = directory;
 const { startHttpServer, setCloudApiKey, setHttpBaseUrl } = require('../.test-dist/http-entry.js');
 after(() => rmSync(directory, { recursive: true, force: true }));
 async function server(t, origins = 'https://app.example.test') {

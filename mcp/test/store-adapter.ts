@@ -13,3 +13,4 @@ export const listSessions = store.listSessions.bind(store);
 export const getPendingAnnotations = store.getPendingAnnotations.bind(store);
 export const addThreadMessage = store.addThreadMessage.bind(store);
 export const getEventsSince = store.getEventsSince.bind(store);
+export const referencedAttachmentIds = store.referencedAttachmentIds.bind(store);

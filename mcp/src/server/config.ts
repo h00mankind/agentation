@@ -1,3 +1,11 @@
+import { homedir } from "os";
+import { join } from "path";
+
+/** Directory holding store.db and attachments/. Read per call so a changed HOME applies. */
+export function getDataDir(): string {
+  return join(homedir(), ".agentation");
+}
+
 // Reject partial parses, negative counts and values that overflow Node timers.
 export function integerEnv(
   name: string,

@@ -4,11 +4,10 @@
  */
 
 import Database from "better-sqlite3";
-import { integerEnv } from "./config.js";
+import { getDataDir, integerEnv } from "./config.js";
 import { createHash, randomBytes } from "crypto";
 import { mkdirSync, existsSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import type {
   AFSStore,
   AFSEvent,
@@ -32,7 +31,7 @@ import { eventBus } from "./events.js";
 // -----------------------------------------------------------------------------
 
 function getDbPath(): string {
-  const dataDir = join(homedir(), ".agentation");
+  const dataDir = getDataDir();
   if (!existsSync(dataDir)) {
     mkdirSync(dataDir, { recursive: true });
   }
